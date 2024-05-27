@@ -26,6 +26,11 @@ class TMDistilDireDataset(Dataset):
         else:
             self.fake_paths = list(map(lambda x: (x, "", "", True), self.__fake_img_paths))
             self.real_paths = list(map(lambda x: (x, "", "", False), self.__real_img_paths))
+        
+        if len(self.fake_paths) > len(self.real_paths):
+            self.fake_paths = self.fake_paths[:len(self.real_paths)]
+        elif len(self.fake_paths) < len(self.real_paths):
+            self.real_paths = self.real_paths[:len(self.fake_paths)]
         self.img_paths = self.fake_paths + self.real_paths
         
     def __len__(self):

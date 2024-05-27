@@ -4,7 +4,7 @@ import torch.nn as nn
 
 import torchvision.models as TVM
 from collections import OrderedDict
-from sklearn.metrics import accuracy_score, average_precision_score
+from sklearn.metrics import accuracy_score, average_precision_score,precision_score, recall_score
 import torch.distributed as dist
 from tqdm.auto import tqdm
 import numpy as np
@@ -205,6 +205,12 @@ class Trainer(BaseModel):
         print(f"Model loaded from {model_path}")
         return True 
     
+    @torch.inference_mode()
+    def predict(self, data):
+        self.set_input(data)
+        self.forward()
+        return self.output['logit'].sigmoid().item()
+    
     @torch.no_grad()
     def validate(self, gather=False, save=False, save_name=""):
         self.student.eval()
@@ -236,15 +242,17 @@ class Trainer(BaseModel):
         
         y_true, y_pred = np.array(y_true), np.array(y_pred)
         acc = accuracy_score(y_true, y_pred > 0.5)
+        prec = precision_score(y_true, y_pred > 0.5),
+        rec = recall_score(y_true, y_pred > 0.5)
         ap = average_precision_score(y_true, y_pred)
         if self.run:
-            self.run.log({"val_acc": acc, "val_ap": ap})
+            self.run.log({"val_acc": acc, "val_ap": ap, "val_prec": prec, "val_rec": rec})
             self.run.log({"N_FAKE": N_FAKE, "N_REAL": N_REAL})
-        print(f"Validation: acc: {acc}, ap: {ap}")
+        print(f"Validation: acc: {acc}, ap: {ap}, prec: {prec}, rec: {rec}")
         print(f"N_FAKE: {N_FAKE}, N_REAL: {N_REAL}")
         if save:
             with open(save_name, "w") as f:
-                f.write(f"Validation: acc: {acc}, ap: {ap}")
+                f.write(f"Validation: acc: {acc}, ap: {ap}, prec: {prec}, rec: {rec}\n")
                 f.write(f"N_FAKE: {N_FAKE}, N_REAL: {N_REAL}")
         
         

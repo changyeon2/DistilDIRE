@@ -158,10 +158,17 @@ if __name__ == "__main__":
     import torch.distributed as dist
     import os 
     
-    dist.init_process_group(backend='nccl', init_method='env://')
     
-    local_rank = int(os.environ['LOCAL_RANK']) 
-    torch.cuda.set_device(local_rank)
+    try:
+        local_rank = int(os.environ['LOCAL_RANK']) 
+        world_size = int(os.environ['WORLD_SIZE'])
+        if world_size > 1:
+            dist.init_process_group(backend='nccl', init_method='env://')
+        
+        torch.cuda.set_device(local_rank)
+    except:
+        local_rank=0
+        world_size=1
     
     # Set device for this process
     device = torch.device("cuda") 
@@ -176,7 +183,10 @@ if __name__ == "__main__":
     adm_model.eval()
 
     dataset = TMDistilDireDataset(adm_args['data_root'], prepared_dire=False)
-    sampler = DistributedSampler(dataset, shuffle=False)
+    if world_size > 1:
+        sampler = DistributedSampler(dataset, shuffle=False)
+    else:
+        sampler = None
     
     os.makedirs(osp.join(adm_args['save_root'], 'images', 'fakes'), exist_ok=True)
     os.makedirs(osp.join(adm_args['save_root'], 'images', 'reals'), exist_ok=True)
@@ -187,8 +197,20 @@ if __name__ == "__main__":
     print(f"Dataset length: {len(dataset)}")
     dataloader = DataLoader(dataset, batch_size=adm_args['batch_size'], num_workers=2, drop_last=False, sampler=sampler)
     transform = transforms.Compose([transforms.Resize(224), transforms.CenterCrop((224, 224))])
-
-    for (img_batch, dire_batch, eps_batch, isfake_batch), (img_pathes, dire_pathes, eps_pathes) in tqdm(dataloader):
+    data_iter = iter(dataloader)
+    (img_batch, dire_batch, eps_batch, isfake_batch), (img_pathes, dire_pathes, eps_pathes) = next(data_iter)
+    tqdm = tqdm(dataloader, total=len(dataloader), desc="Computing DIRE & EPS")
+    while True:
+        try:
+            (img_batch, dire_batch, eps_batch, isfake_batch), (img_pathes, dire_pathes, eps_pathes) = next(data_iter)
+            tqdm.update()
+        except StopIteration:
+            break
+        except Exception as e:
+            print("Error in loading data", e)
+            tqdm.update()
+            continue
+    
         haveall=True 
         for i in range(len(img_batch)):
             basename = osp.basename(img_pathes[i])
@@ -211,8 +233,9 @@ if __name__ == "__main__":
             if adm_args['compute_dire']:
                 dire_img, img, recons = dire(img_batch, adm_model, diffusion, adm_args)
                 dire_img = transform(dire_img).detach().cpu()
-                img = transform(img).detach().cpu()
-            
+                
+            img = transform(img_batch).detach().cpu()
+            img = (img+1)*0.5
             for i in range(len(img_batch)):
                 basename = osp.basename(img_pathes[i])
                 isfake = isfake_batch[i]
@@ -223,7 +246,8 @@ if __name__ == "__main__":
                 
                 if not osp.exists(img_path):
                     torchvision.utils.save_image(img[i], img_path)
-                if not osp.exists(dire_path):
+                if adm_args['compute_dire'] and (not osp.exists(dire_path)):
                     torchvision.utils.save_image(dire_img[i], dire_path)
-                if not osp.exists(eps_path) and eps is not None:
+                    
+                if adm_args['compute_eps'] and (not osp.exists(eps_path)) and (eps is not None):
                     torch.save(eps[i], eps_path)
