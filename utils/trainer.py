@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 import numpy as np
 
 from utils.config import CONFIGCLASS
-from networks.distill_model import DistilDIRE, DIRE, DistilDIREOnlyEPS
+from networks.distill_model import DistilDIRE, DIRE, DistilDIREOnlyEPS, DistilDIREAdd
 from utils.warmup import GradualWarmupScheduler
 import os.path as osp
 
@@ -84,7 +84,6 @@ class Trainer(BaseModel):
         self.arch = cfg.arch
         self.reproduce_dire = cfg.reproduce_dire
         self.only_eps = cfg.only_eps
-        self.test_name = osp.basename(cfg.dataset_test_root)
         self.rank = rank
         self.device = torch.device(f"cuda") 
         self.distributed = distributed
@@ -107,7 +106,8 @@ class Trainer(BaseModel):
             if self.only_eps:
                 self.student = DistilDIREOnlyEPS(self.device).to(self.device)
             else:
-                self.student = DistilDIRE(self.device).to(self.device)
+                # self.student = DistilDIRE(self.device).to(self.device)
+                self.student = DistilDIREAdd(self.device).to(self.device)
             __backbone = TVM.resnet50(weights=TVM.ResNet50_Weights.DEFAULT)
             self.teacher = nn.Sequential(OrderedDict([*(list(__backbone.named_children())[:-2])])) # drop last layer which is classifier
             self.teacher.eval().to(self.device)
@@ -138,7 +138,7 @@ class Trainer(BaseModel):
             self.scheduler = GradualWarmupScheduler(
                 self.optimizer, multiplier=1, total_epoch=cfg.warmup_epoch, after_scheduler=scheduler_cosine
             )
-            self.scheduler.step()        
+            
 
     def adjust_learning_rate(self, min_lr=1e-6):
         for param_group in self.optimizer.param_groups:
@@ -188,6 +188,8 @@ class Trainer(BaseModel):
         self.loss = self.get_loss(self.kd)
         self.loss.backward()
         self.optimizer.step()
+        if self.cfg.warmup:    
+            self.scheduler.step()
 
     
     
@@ -216,47 +218,50 @@ class Trainer(BaseModel):
     @torch.no_grad()
     def validate(self, gather=False, save=False, save_name=""):
         self.student.eval()
-        y_pred = []
-        y_true = []
-        N_FAKE, N_REAL = 0, 0
-        for data, path in tqdm(self.val_loader, desc=f"Validation after {self.cur_epoch} epoch..."):
-            self.set_input(data)
-            self.forward()
-            pred = self.output['logit'].sigmoid()
+        for val_loader in self.val_loader:
+            print(f"Validation on {val_loader.dataset.root}")
+            test_name = osp.basename(val_loader.dataset.root)
+            y_pred = []
+            y_true = []
+            N_FAKE, N_REAL = 0, 0
+            for data, path in tqdm(val_loader, desc=f"Validation after {self.cur_epoch} epoch..."):
+                self.set_input(data)
+                self.forward()
+                pred = self.output['logit'].sigmoid()
+                
+                if gather:
+                    try:
+                        dist
+                    except:
+                        import torch.distributed as dist
+                    pred_gather = [pred for _ in range(self.world_size)]
+                    label_gather = [self.label for _ in range(self.world_size)]
+                    dist.all_gather(pred_gather, pred)
+                    dist.all_gather(label_gather, self.label)
+                else:
+                    pred_gather = [pred]
+                    label_gather = [self.label]
+                N_FAKE += sum([(label == 1).sum().item() for label in label_gather])
+                N_REAL += sum([(label == 0).sum().item() for label in label_gather])
+                
+                y_pred.extend(torch.cat(pred_gather).flatten().detach().cpu().tolist())
+                y_true.extend(torch.cat(label_gather).flatten().detach().cpu().tolist())
             
-            if gather:
-                try:
-                    dist
-                except:
-                    import torch.distributed as dist
-                pred_gather = [pred for _ in range(self.world_size)]
-                label_gather = [self.label for _ in range(self.world_size)]
-                dist.all_gather(pred_gather, pred)
-                dist.all_gather(label_gather, self.label)
-            else:
-                pred_gather = [pred]
-                label_gather = [self.label]
-            N_FAKE += sum([(label == 1).sum().item() for label in label_gather])
-            N_REAL += sum([(label == 0).sum().item() for label in label_gather])
+            y_true, y_pred = np.array(y_true), np.array(y_pred)
+            acc = accuracy_score(y_true, y_pred > 0.5)
+            prec = precision_score(y_true, y_pred > 0.5),
+            rec = recall_score(y_true, y_pred > 0.5)
+            ap = average_precision_score(y_true, y_pred)
+            if self.run:
+                self.run.log({f"{test_name}_val_acc": acc, f"{test_name}_val_ap": ap, f"{test_name}_val_prec": prec, f"{test_name}_val_rec": rec})
+                self.run.log({f"{test_name}_N_FAKE": N_FAKE, f"{test_name}_N_REAL": N_REAL})
+            print(f"{test_name}_Validation: acc: {acc}, ap: {ap}, prec: {prec}, rec: {rec}")
+            print(f"{test_name}_N_FAKE: {N_FAKE}, N_REAL: {N_REAL}")
+            if save:
+                with open(save_name, "a") as f:
+                    f.write(f"{test_name}_Validation: acc: {acc}, ap: {ap}, prec: {prec}, rec: {rec}\n")
+                    f.write(f"{test_name}_N_FAKE: {N_FAKE}, N_REAL: {N_REAL}")
             
-            y_pred.extend(torch.cat(pred_gather).flatten().detach().cpu().tolist())
-            y_true.extend(torch.cat(label_gather).flatten().detach().cpu().tolist())
-        
-        y_true, y_pred = np.array(y_true), np.array(y_pred)
-        acc = accuracy_score(y_true, y_pred > 0.5)
-        prec = precision_score(y_true, y_pred > 0.5),
-        rec = recall_score(y_true, y_pred > 0.5)
-        ap = average_precision_score(y_true, y_pred)
-        if self.run:
-            self.run.log({"val_acc": acc, "val_ap": ap, "val_prec": prec, "val_rec": rec})
-            self.run.log({"N_FAKE": N_FAKE, "N_REAL": N_REAL})
-        print(f"Validation: acc: {acc}, ap: {ap}, prec: {prec}, rec: {rec}")
-        print(f"N_FAKE: {N_FAKE}, N_REAL: {N_REAL}")
-        if save:
-            with open(save_name, "w") as f:
-                f.write(f"Validation: acc: {acc}, ap: {ap}, prec: {prec}, rec: {rec}\n")
-                f.write(f"N_FAKE: {N_FAKE}, N_REAL: {N_REAL}")
-        
         
     def train(self):
         for epoch in range(self.cfg.nepoch):

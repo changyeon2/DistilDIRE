@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torchvision.models as TVM
 from collections import OrderedDict
+from copy import deepcopy
 
 import torch
 
@@ -48,7 +49,30 @@ class DistilDIREOnlyEPS(DistilDIRE):
         feature = self.student_backbone(eps) 
         logit = self.student_head(feature)
         return {'logit':logit, 'feature':feature}
+    
+# ------------------------------------------------------------------------------
+class DistilDIREAdd(DistilDIRE):
+    def __init__(self, device):
+        super(DistilDIREAdd, self).__init__(device)
+        self.student_backbone.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # self.eps_backbone = deepcopy(self.student_backbone)
+        
+        state_dict = TVM.ResNet50_Weights.IMAGENET1K_V1.get_state_dict()
+        self.student_backbone.load_state_dict(state_dict=state_dict, strict=False)
+        # self.eps_backbone.load_state_dict(state_dict=state_dict, strict=False)
+        
+        self.student_head = nn.Sequential(nn.AdaptiveAvgPool2d(1),
+                                          nn.Flatten(),
+                                          nn.Linear(2048, 1),)
+        
+    def forward(self, img, eps):
+        img = img.to(self.device)
+        eps = eps.to(self.device)
 
+        feature = self.student_backbone((img-eps)*0.5)
+        logit = self.student_head(feature)
+       
+        return {'logit':logit, 'feature':feature}
 
 # ------------------------------------------------------------------------------
 class DIRE(torch.nn.Module):

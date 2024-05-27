@@ -10,6 +10,6 @@ for i in 0
 do
     SAVE_FLAGS="--data_root ${DATA_ROOT[$i]} --save_root ${SAVE_ROOT[$i]}"
     echo "Running on ${DATA_ROOT[$i]} with save root ${SAVE_ROOT[$i]}"
-    torchrun --standalone --nproc_per_node 1 -m guided_diffusion.compute_dire_eps --model_path $MODEL_PATH $PREPROCESS_FLAGS $SAMPLE_FLAGS $SAVE_FLAGS
+    torchrun --standalone --nproc_per_node 8 -m guided_diffusion.compute_dire_eps --model_path $MODEL_PATH $PREPROCESS_FLAGS $SAMPLE_FLAGS $SAVE_FLAGS
 done
 

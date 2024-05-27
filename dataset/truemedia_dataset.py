@@ -27,10 +27,10 @@ class TMDistilDireDataset(Dataset):
             self.fake_paths = list(map(lambda x: (x, "", "", True), self.__fake_img_paths))
             self.real_paths = list(map(lambda x: (x, "", "", False), self.__real_img_paths))
         
-        if len(self.fake_paths) > len(self.real_paths):
-            self.fake_paths = self.fake_paths[:len(self.real_paths)]
-        elif len(self.fake_paths) < len(self.real_paths):
-            self.real_paths = self.real_paths[:len(self.fake_paths)]
+        # if len(self.fake_paths) > len(self.real_paths):
+        #     self.fake_paths = self.fake_paths[:len(self.real_paths)]
+        # elif len(self.fake_paths) < len(self.real_paths):
+        #     self.real_paths = self.real_paths[:len(self.fake_paths)]
         self.img_paths = self.fake_paths + self.real_paths
         
     def __len__(self):
@@ -53,6 +53,12 @@ class TMDistilDireDataset(Dataset):
             dire = torch.zeros_like(img)
             eps = torch.zeros_like(img)
 
+        # random horizontal flip
+        if torch.rand(1) > 0.5:
+            img = torch.flip(img, [2])
+            dire = torch.flip(dire, [2])
+            eps = torch.flip(eps, [2])
+        
         return (img, dire, eps, isfake), (img_path, dire_path, eps_path)
     
     

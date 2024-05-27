@@ -198,7 +198,6 @@ if __name__ == "__main__":
     dataloader = DataLoader(dataset, batch_size=adm_args['batch_size'], num_workers=2, drop_last=False, sampler=sampler)
     transform = transforms.Compose([transforms.Resize(224), transforms.CenterCrop((224, 224))])
     data_iter = iter(dataloader)
-    (img_batch, dire_batch, eps_batch, isfake_batch), (img_pathes, dire_pathes, eps_pathes) = next(data_iter)
     tqdm = tqdm(dataloader, total=len(dataloader), desc="Computing DIRE & EPS")
     while True:
         try:

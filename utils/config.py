@@ -22,7 +22,7 @@ class DefaultConfigs(ABC):
     isTrain = True
 
     ####### train setting ######
-    warmup = False
+    warmup = True
     warmup_epoch = 3
     earlystop = True
     earlystop_epoch = 5
@@ -154,13 +154,15 @@ cfg.exp_name = args.exp_name
 cfg.batch_size = args.batch
 cfg.datasets = args.datasets
 cfg.datasets_test = args.datasets_test if args.datasets_test else args.datasets
+cfg.datasets_test = cfg.datasets_test.split(",")
+
 cfg.pretrained_weights = args.pretrained_weights
 cfg.lr = args.lr
 cfg.nepoch = args.epoch
 
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 cfg.dataset_root = os.path.join(root_dir, 'datasets', cfg.datasets)
-cfg.dataset_test_root = os.path.join(root_dir, 'datasets', cfg.datasets_test)
+cfg.dataset_test_root = [os.path.join(root_dir, 'datasets', dt) for dt in cfg.datasets_test]
 cfg.kd = args.kd
 cfg.reproduce_dire = args.reproduce_dire
 cfg.only_eps = args.only_eps

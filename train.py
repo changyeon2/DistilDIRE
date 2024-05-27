@@ -9,20 +9,20 @@ def main(run, cfg):
     
     if cfg.reproduce_dire:
         dataset = TMDireDataset(cfg.dataset_root)
-        val_dataset = TMDireDataset(cfg.dataset_test_root)
+        val_dataset = [TMDireDataset(root) for root in cfg.dataset_test_root]
     else:
         dataset= TMDistilDireDataset(cfg.dataset_root)
-        val_dataset = TMDistilDireDataset(cfg.dataset_test_root)
+        val_dataset = [TMDistilDireDataset(root) for root in cfg.dataset_test_root]
     sampler = DistributedSampler(dataset)
-    val_samlper = DistributedSampler(val_dataset)
+    val_samlper = [DistributedSampler(vs) for vs in val_dataset]
     dataloader = DataLoader(dataset, 
                             batch_size=cfg.batch_size, 
                             sampler=sampler,
                             num_workers=2)
-    val_loader = DataLoader(val_dataset, 
+    val_loader = [DataLoader(vd, 
                             batch_size=cfg.batch_size, 
-                            sampler=val_samlper,
-                            num_workers=2)
+                            sampler=vs,
+                            num_workers=2) for vd, vs in zip(val_dataset, val_samlper)]
     trainer = Trainer(cfg, dataloader, val_loader, run, local_rank, True, world_size, cfg.kd)
     if cfg.pretrained_weights:
         trainer.load_networks(cfg.pretrained_weights)
